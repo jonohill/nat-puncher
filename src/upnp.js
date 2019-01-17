@@ -225,7 +225,7 @@ var sendSsdpRequest = function () {
  */
 var fetchControlUrl = function (ssdpResponse) {
   // Promise to parse the location URL from the SSDP response, then send a POST
-  // xhr to the location URL to find the router's UPNP control URL
+  // req to the location URL to find the router's UPNP control URL
   var _fetchControlUrl = new Promise(function (F, R) {
     var ssdpStr = utils.arrayBufferToString(ssdpResponse.buffer)
     var startIndex = ssdpStr.indexOf('LOCATION:') + 9
@@ -317,7 +317,7 @@ var sendAddPortMapping = function (controlUrl, privateIp, intPort, extPort, life
         .on('end', function () {
           if (res.statusCode === 200) {
             // Success response to AddPortMapping
-            F(xhr.responseText)
+            F(responseText)
           } else if (res.statusCode === 500) {
             // Error response to AddPortMapping
             var startIndex = responseText.indexOf('<errorDescription>') + 18
