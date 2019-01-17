@@ -2,6 +2,7 @@
 
 const utils = require('./utils')
 const dgram = require('dgram')
+const http = require('http')
 
 /**
  * Probe if UPnP AddPortMapping is supported by the router
@@ -236,31 +237,32 @@ var fetchControlUrl = function (ssdpResponse) {
       return
     }
     // Get the XML device description at location URL
-    var xhr = new XMLHttpRequest()
-    xhr.open('GET', locationUrl, true)
-    xhr.onreadystatechange = function () {
-      if (xhr.readyState === 4) {
-        // Get control URL from XML file
-        // (Ideally we would parse and traverse the XML tree,
-        // but DOMParser is not available here)
-        var xmlDoc = xhr.responseText
-        var preIndex = xmlDoc.indexOf('WANIPConnection')
-        var startIndex = xmlDoc.indexOf('<controlURL>', preIndex) + 13
-        var endIndex = xmlDoc.indexOf('</controlURL>', startIndex)
-        // Reject if there is no controlUrl
-        if (preIndex === -1 || startIndex === 12) {
-          R(new Error('Could not parse control URL'))
-          return
-        }
-        // Combine the controlUrl path with the locationUrl
-        var controlUrlPath = xmlDoc.substring(startIndex, endIndex)
-        var locationUrlParser = new URL(locationUrl)
-        var controlUrl = 'http://' + locationUrlParser.host +
-          '/' + controlUrlPath
-        F(controlUrl)
-      }
-    }
-    xhr.send()
+    http.get(locationUrl, function (res) {
+      var xmlDoc = ''  
+      res.setEncoding('utf8')
+        .on('data', function (chunk) {
+          xmlDoc += chunk
+        })
+        .on('end', function () {
+          // Get control URL from XML file
+          // (Ideally we would parse and traverse the XML tree,
+          // but DOMParser is not available here)
+          var preIndex = xmlDoc.indexOf('WANIPConnection')
+          var startIndex = xmlDoc.indexOf('<controlURL>', preIndex) + 13
+          var endIndex = xmlDoc.indexOf('</controlURL>', startIndex)
+          // Reject if there is no controlUrl
+          if (preIndex === -1 || startIndex === 12) {
+            R(new Error('Could not parse control URL'))
+            return
+          }
+          // Combine the controlUrl path with the locationUrl
+          var controlUrlPath = xmlDoc.substring(startIndex, endIndex)
+          var locationUrlParser = new URL(locationUrl)
+          var controlUrl = 'http://' + locationUrlParser.host +
+            '/' + controlUrlPath
+          F(controlUrl)
+        })
+    })
   })
   // Give _fetchControlUrl 1 second before timing out
   return Promise.race([
@@ -298,26 +300,35 @@ var sendAddPortMapping = function (controlUrl, privateIp, intPort, extPort, life
       '</u:AddPortMapping>' +
       '</s:Body>' +
       '</s:Envelope>'
-    // Create an XMLHttpRequest that encapsulates the SOAP string
-    var xhr = new XMLHttpRequest()
-    xhr.open('POST', controlUrl, true)
-    xhr.setRequestHeader('Content-Type', 'text/xml')
-    xhr.setRequestHeader('SOAPAction', '"urn:schemas-upnp-org:service:WANIPConnection:1#AddPortMapping"')
-    // Send the AddPortMapping request
-    xhr.onreadystatechange = function () {
-      if (xhr.readyState === 4 && xhr.status === 200) {
-        // Success response to AddPortMapping
-        F(xhr.responseText)
-      } else if (xhr.readyState === 4 && xhr.status === 500) {
-        // Error response to AddPortMapping
-        var responseText = xhr.responseText
-        var startIndex = responseText.indexOf('<errorDescription>') + 18
-        var endIndex = responseText.indexOf('</errorDescription>', startIndex)
-        var errorDescription = responseText.substring(startIndex, endIndex)
-        R(new Error('AddPortMapping Error: ' + errorDescription))
+    // Create an http request that encapsulates the SOAP string
+    var httpOptions = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/xml',
+        'SOAPAction': '"urn:schemas-upnp-org:service:WANIPConnection:1#AddPortMapping"'
       }
     }
-    xhr.send(apm)
+    var req = http.request(controlUrl, httpOptions, function (res) {
+      var responseText = ''
+      res.setEncoding('utf8')
+        .on('data', function (chunk) {
+          responseText += chunk
+        })
+        .on('end', function () {
+          if (res.statusCode === 200) {
+            // Success response to AddPortMapping
+            F(xhr.responseText)
+          } else if (res.statusCode === 500) {
+            // Error response to AddPortMapping
+            var startIndex = responseText.indexOf('<errorDescription>') + 18
+            var endIndex = responseText.indexOf('</errorDescription>', startIndex)
+            var errorDescription = responseText.substring(startIndex, endIndex)
+            R(new Error('AddPortMapping Error: ' + errorDescription))
+          }          
+        })
+    })
+    req.write(apm)
+    req.end()
   })
   // Give _sendAddPortMapping 1 second to run before timing out
   return Promise.race([
@@ -348,27 +359,36 @@ var sendDeletePortMapping = function (controlUrl, extPort) {
       '</u:DeletePortMapping>' +
       '</s:Body>' +
       '</s:Envelope>'
-    // Create an XMLHttpRequest that encapsulates the SOAP string
-    var xhr = new XMLHttpRequest()
-    xhr.open('POST', controlUrl, true)
-    xhr.setRequestHeader('Content-Type', 'text/xml')
-    xhr.setRequestHeader('SOAPAction', '"urn:schemas-upnp-org:service:WANIPConnection:1#DeletePortMapping"')
-    // Send the DeletePortMapping request
-    xhr.onreadystatechange = function () {
-      if (xhr.readyState === 4 && xhr.status === 200) {
-        // Success response to DeletePortMapping
-        F(xhr.responseText)
-      } else if (xhr.readyState === 4 && xhr.status === 500) {
-        // Error response to DeletePortMapping
-        // It seems that this almost never errors, even with invalid port numbers
-        var responseText = xhr.responseText
-        var startIndex = responseText.indexOf('<errorDescription>') + 18
-        var endIndex = responseText.indexOf('</errorDescription>', startIndex)
-        var errorDescription = responseText.substring(startIndex, endIndex)
-        R(new Error('DeletePortMapping Error: ' + errorDescription))
+    // Create an http request that encapsulates the SOAP string
+    var reqOptions = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/xml',
+        'SOAPAction': '"urn:schemas-upnp-org:service:WANIPConnection:1#DeletePortMapping"'
       }
     }
-    xhr.send(apm)
+    var req = http.request(controlUrl, reqOptions, function (res) {
+      var responseText = ''
+      res.setEncoding('utf8')
+        .on('data', function (chunk) {
+          responseText += chunk
+        })
+        .on('end', function () {
+          if (res.statusCode === 200) {
+            // Success response to DeletePortMapping
+            F(responseText)
+          } else if (res.statusCode === 500) {
+            // Error response to DeletePortMapping
+            // It seems that this almost never errors, even with invalid port numbers
+            var startIndex = responseText.indexOf('<errorDescription>') + 18
+            var endIndex = responseText.indexOf('</errorDescription>', startIndex)
+            var errorDescription = responseText.substring(startIndex, endIndex)
+            R(new Error('DeletePortMapping Error: ' + errorDescription))
+          }
+        })
+    })
+    req.write(apm)
+    req.end()
   })
   // Give _sendDeletePortMapping 1 second to run before timing out
   return Promise.race([
